@@ -64,11 +64,37 @@ export default class extends Controller {
 
     this.updateGauge(this.scoreValue)
 
+    // Initialize existing locations to fly in after a short delay
+    setTimeout(() => {
+      this.initializeExistingLocations()
+    }, 500)
+
     // Periodically fetch the current score to handle score decay over time
     // Poll more frequently for smooth degradation
     this.scoreInterval = setInterval(() => {
       this.fetchCurrentScore()
     }, 500) // Update every 500ms for smooth degradation
+  }
+
+  initializeExistingLocations() {
+    const list = document.querySelector(".recent-cheers-list")
+    if (!list) {
+      console.log("No recent-cheers-list found for initialization")
+      return
+    }
+
+    const items = list.querySelectorAll("li[data-location]")
+    console.log(`Initializing ${items.length} existing locations`)
+
+    items.forEach((item, index) => {
+      const location = item.getAttribute("data-location")
+      if (location && location.trim()) {
+        // Stagger the initial animations
+        setTimeout(() => {
+          this.createFlyingLocation(location)
+        }, index * 150)
+      }
+    })
   }
 
   disconnect() {
@@ -94,26 +120,146 @@ export default class extends Controller {
   }
 
   updateRecentCheers(cheers) {
-    // Search from document since this.element is just the gauge container
-    const list = document.querySelector(".recent-cheers-list")
-    if (!list) {
-      console.warn("⚠️ Recent cheers list not found in DOM")
+    const container = document.querySelector(".flying-locations-container")
+    if (!container) {
+      console.warn("⚠️ Flying locations container not found in DOM")
       return
     }
 
-    console.log("✅ Updating recent cheers list with", cheers.length, "cheers")
-    console.log("✅ Cheers data:", JSON.stringify(cheers, null, 2))
+    console.log("✅ Creating flying locations for", cheers.length, "cheers")
 
-    // Use the formatted location from the server (already formatted consistently)
-    const html = cheers.map(cheer => {
-      const location = cheer.formatted_location || "unknown location"
-      console.log("✅ Rendering cheer with location:", location)
-      return `<li class="text-gray-700">🎉 Cheer from ${location}!</li>`
-    }).join("")
+    // Get the newest cheer (first in the array)
+    if (cheers.length > 0) {
+      const newestCheer = cheers[0]
+      const location = newestCheer.formatted_location || "unknown location"
 
-    console.log("✅ Generated HTML:", html)
-    list.innerHTML = html
-    console.log("✅ List updated, new innerHTML length:", list.innerHTML.length)
+      console.log("✅ Creating flying location:", location)
+
+      // Create a flying location element
+      this.createFlyingLocation(location)
+    }
+  }
+
+  createFlyingLocation(location) {
+    const container = document.querySelector(".flying-locations-container")
+    if (!container) {
+      console.warn("⚠️ Flying locations container not found")
+      return
+    }
+
+    if (!location || !location.trim()) {
+      console.warn("⚠️ No location provided to createFlyingLocation")
+      return
+    }
+
+    // Create the element
+    const element = document.createElement("div")
+    element.className = "flying-location"
+    element.textContent = `🎉 ${location}`
+    element.style.cssText = `
+      position: absolute;
+      font-size: 1.5rem;
+      font-weight: bold;
+      color: white;
+      text-shadow: 3px 3px 6px rgba(0,0,0,0.8), -1px -1px 2px rgba(0,0,0,0.5);
+      white-space: nowrap;
+      pointer-events: none;
+      opacity: 0;
+      transform: scale(0.5);
+      background: rgba(0, 0, 0, 0.4);
+      padding: 8px 16px;
+      border-radius: 20px;
+      backdrop-filter: blur(4px);
+      border: 2px solid rgba(255, 255, 255, 0.3);
+    `
+
+    // Get viewport dimensions
+    const viewportWidth = window.innerWidth
+    const viewportHeight = window.innerHeight
+
+    // Calculate safe zone around the gauge (center area)
+    const gaugeCenterX = viewportWidth / 2
+    const gaugeCenterY = viewportHeight / 2 - 100 // Adjust for title
+    const gaugeRadius = 350 // Approximate gauge radius
+    const safeZone = gaugeRadius + 100 // Extra padding
+
+    // Estimate text width (rough calculation: ~10px per character + padding)
+    const estimatedTextWidth = (location.length + 3) * 10 + 32 // +3 for emoji, +32 for padding
+    const estimatedHeight = 50 // Height including padding
+
+    // Generate random position, avoiding the gauge center area and ensuring it stays on screen
+    let x, y
+    let attempts = 0
+    const maxAttempts = 100
+
+    do {
+      // Ensure the element stays within viewport bounds
+      // Account for text width on the right and height on the bottom
+      const maxX = viewportWidth - estimatedTextWidth - 20 // 20px margin
+      const maxY = viewportHeight - estimatedHeight - 20 // 20px margin
+
+      x = Math.random() * (maxX - 20) + 20 // 20px margin on left
+      y = Math.random() * (maxY - 20) + 20 // 20px margin on top
+
+      attempts++
+    } while (
+      Math.sqrt(Math.pow(x - gaugeCenterX, 2) + Math.pow(y - gaugeCenterY, 2)) < safeZone &&
+      attempts < maxAttempts
+    )
+
+    // If we couldn't find a good spot, place it in a corner area
+    if (attempts >= maxAttempts) {
+      // Try corners first
+      const corners = [
+        { x: 20, y: 20 }, // Top left
+        { x: viewportWidth - estimatedTextWidth - 20, y: 20 }, // Top right
+        { x: 20, y: viewportHeight - estimatedHeight - 20 }, // Bottom left
+        { x: viewportWidth - estimatedTextWidth - 20, y: viewportHeight - estimatedHeight - 20 } // Bottom right
+      ]
+
+      // Find a corner that's not in the safe zone
+      const validCorner = corners.find(corner => {
+        const distance = Math.sqrt(Math.pow(corner.x - gaugeCenterX, 2) + Math.pow(corner.y - gaugeCenterY, 2))
+        return distance >= safeZone
+      })
+
+      if (validCorner) {
+        x = validCorner.x
+        y = validCorner.y
+      } else {
+        // Fallback: place it safely on the edge
+        x = Math.max(20, Math.min(viewportWidth - estimatedTextWidth - 20, viewportWidth / 4))
+        y = Math.max(20, Math.min(viewportHeight - estimatedHeight - 20, viewportHeight / 4))
+      }
+    }
+
+    // Ensure final position is within bounds
+    x = Math.max(20, Math.min(viewportWidth - estimatedTextWidth - 20, x))
+    y = Math.max(20, Math.min(viewportHeight - estimatedHeight - 20, y))
+
+    element.style.left = `${x}px`
+    element.style.top = `${y}px`
+
+    container.appendChild(element)
+
+    // Animate flying in
+    requestAnimationFrame(() => {
+      element.style.transition = "all 0.8s cubic-bezier(0.34, 1.56, 0.64, 1)"
+      element.style.opacity = "1"
+      element.style.transform = "scale(1)"
+    })
+
+    // Fade out and remove after 5 seconds
+    setTimeout(() => {
+      element.style.transition = "all 1s ease-out"
+      element.style.opacity = "0"
+      element.style.transform = "scale(0.8) translateY(-20px)"
+      setTimeout(() => {
+        if (element.parentNode) {
+          element.parentNode.removeChild(element)
+        }
+      }, 1000)
+    }, 5000)
   }
 
   updateScore(newScore) {

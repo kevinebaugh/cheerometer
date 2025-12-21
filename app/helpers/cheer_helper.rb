@@ -120,16 +120,9 @@ module CheerHelper
         location_text.hash
       end
 
-      # 70% chance to add suffix, but varies per cheer
-      should_add_suffix = (seed.abs % 10) < 7
-
-      if should_add_suffix
-        # Use cheer_id hash to pick different suffix for each cheer
-        suffix_index = seed.abs % LOCATION_SUFFIXES.length
-        "#{location_text}, #{LOCATION_SUFFIXES[suffix_index]}"
-      else
-        location_text
-      end
+      # Always add a suffix for variety - use cheer_id hash to pick different suffix for each cheer
+      suffix_index = seed.abs % LOCATION_SUFFIXES.length
+      "#{location_text}, #{LOCATION_SUFFIXES[suffix_index]}"
     else
       # For unknown locations, use cheer_id for deterministic selection
       # If no ID provided, fall back to a simple hash
