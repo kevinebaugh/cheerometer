@@ -1,13 +1,13 @@
-<div class="min-h-screen bg-gradient-to-br from-red-500 via-pink-500 to-purple-600 p-8 relative overflow-hidden" data-controller="confetti">
-  <h1 class="text-6xl font-bold text-white text-center mb-8 drop-shadow-lg">🎄 Cheer-O-Meter 🎄</h1>
+<div class="h-screen w-screen bg-gradient-to-br from-red-500 via-pink-500 to-purple-600 p-2 sm:p-4 md:p-8 relative overflow-hidden flex flex-col" data-controller="confetti">
+  <h1 class="text-2xl sm:text-4xl md:text-6xl font-bold text-white text-center mb-2 sm:mb-4 md:mb-8 drop-shadow-lg flex-shrink-0">🎄 Cheer-O-Meter 🎄</h1>
 
-  <div class="flex justify-center items-center mb-8">
+  <div class="flex justify-center items-center flex-1 min-h-0">
     <div
       data-controller="gauge"
       data-gauge-score-value="<%= @score %>"
-      class="gauge-container relative"
+      class="gauge-container relative w-full max-w-[90vw] max-h-[50vh]"
     >
-      <svg width="600" height="360" viewBox="0 0 300 180" class="gauge-svg">
+      <svg width="100%" height="100%" viewBox="0 0 300 180" class="gauge-svg" preserveAspectRatio="xMidYMid meet">
         <!-- Background arc -->
         <path
           class="gauge-background"
@@ -32,8 +32,8 @@
         />
       </svg>
       <!-- Score display -->
-      <div class="absolute bottom-16 left-1/2 transform -translate-x-1/2 text-center px-12 py-8">
-        <div class="text-9xl font-bold text-white gauge-score drop-shadow-2xl"><%= @score %></div>
+      <div class="absolute bottom-8 sm:bottom-12 md:bottom-16 left-1/2 transform -translate-x-1/2 text-center px-4 sm:px-8 md:px-12 py-2 sm:py-4 md:py-8">
+        <div class="text-5xl sm:text-7xl md:text-9xl font-bold text-white gauge-score drop-shadow-2xl"><%= @score %></div>
       </div>
     </div>
   </div>
