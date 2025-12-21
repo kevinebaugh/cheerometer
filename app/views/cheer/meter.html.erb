@@ -1,0 +1,47 @@
+<div class="p-6 flex flex-col items-center">
+  <h1 class="text-3xl font-bold mb-8">Cheer-O-Meter</h1>
+
+  <div
+    data-controller="gauge"
+    data-gauge-score-value="<%= @score %>"
+    class="gauge-container relative mb-8"
+  >
+    <svg width="300" height="180" viewBox="0 0 300 180" class="gauge-svg">
+      <!-- Background arc -->
+      <path
+        class="gauge-background"
+        d="M 50 150 A 100 100 0 0 1 250 150"
+        fill="none"
+        stroke="#e5e7eb"
+        stroke-width="24"
+        stroke-linecap="round"
+      />
+      <!-- Gauge fill arc -->
+      <path
+        class="gauge-fill"
+        d="M 50 150 A 100 100 0 0 1 250 150"
+        fill="none"
+        stroke="#10b981"
+        stroke-width="24"
+        stroke-linecap="round"
+        stroke-dasharray="314.16"
+        stroke-dashoffset="314.16"
+        style="transition: stroke-dashoffset 0.5s ease-out;"
+      />
+    </svg>
+    <!-- Score display -->
+    <div class="absolute bottom-8 left-1/2 transform -translate-x-1/2 text-center">
+      <div class="text-6xl font-bold text-green-600 gauge-score"><%= @score %></div>
+      <div class="text-xl text-gray-600 mt-2">/ 100</div>
+    </div>
+  </div>
+
+  <h2 class="font-bold mb-4 text-xl">Recent Cheers</h2>
+  <ul class="space-y-2 recent-cheers-list">
+    <% @recent_cheers.each do |cheer| %>
+    <li class="text-gray-700">
+      🎉 Cheer from <%= format_location(cheer.city, cheer.country, cheer.id) %>!
+    </li>
+    <% end %>
+  </ul>
+</div>
