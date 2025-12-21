@@ -7,6 +7,9 @@ import { application } from "./application"
 import CheerController from "./cheer_controller"
 application.register("cheer", CheerController)
 
+import ConfettiController from "./confetti_controller"
+application.register("confetti", ConfettiController)
+
 import GaugeController from "./gauge_controller"
 application.register("gauge", GaugeController)
 

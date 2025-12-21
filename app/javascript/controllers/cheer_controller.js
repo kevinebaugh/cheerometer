@@ -2,6 +2,12 @@ import { Controller } from "@hotwired/stimulus"
 
 export default class extends Controller {
   async smash() {
+    // Trigger confetti celebration
+    const confettiContainer = document.querySelector("[data-controller*='confetti']")
+    if (confettiContainer) {
+      confettiContainer.dispatchEvent(new CustomEvent("cheer:celebrate"))
+    }
+
     // Try to get geolocation, fallback to IP-based
     let locationData = null
 

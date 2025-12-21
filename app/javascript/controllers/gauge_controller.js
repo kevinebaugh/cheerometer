@@ -29,6 +29,13 @@ export default class extends Controller {
           },
           received: (data) => {
           console.log("🎉 SMASH! New cheer received, score:", data.score)
+
+          // Trigger confetti celebration
+          const confettiContainer = document.querySelector("[data-controller*='confetti']")
+          if (confettiContainer) {
+            confettiContainer.dispatchEvent(new CustomEvent("cheer:celebrate"))
+          }
+
           if (data.location) {
             console.log("📍 Location:", {
               city: data.location.city || "unknown",
