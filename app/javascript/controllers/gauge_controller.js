@@ -1,17 +1,33 @@
 import { Controller } from "@hotwired/stimulus"
 import { createConsumer } from "@rails/actioncable"
 
+console.log("📦 Gauge controller module loaded")
+
 export default class extends Controller {
   static values = {
     score: Number
   }
 
   connect() {
-    this.consumer = createConsumer()
-    this.subscription = this.consumer.subscriptions.create(
-      { channel: "CheerometerChannel" },
-      {
-        received: (data) => {
+    console.log("🔌 Gauge controller connected, setting up ActionCable...")
+
+    try {
+      this.consumer = createConsumer()
+      console.log("✅ ActionCable consumer created")
+
+      this.subscription = this.consumer.subscriptions.create(
+        { channel: "CheerometerChannel" },
+        {
+          connected: () => {
+            console.log("✅ ActionCable connected to CheerometerChannel")
+          },
+          disconnected: () => {
+            console.warn("⚠️ ActionCable disconnected from CheerometerChannel")
+          },
+          rejected: () => {
+            console.error("❌ ActionCable subscription rejected")
+          },
+          received: (data) => {
           console.log("🎉 SMASH! New cheer received, score:", data.score)
           if (data.location) {
             console.log("📍 Location:", {
@@ -25,14 +41,27 @@ export default class extends Controller {
           }
           if (data.recent_cheers) {
             console.log("📋 Recent cheers received:", data.recent_cheers)
+            console.log("📋 Recent cheers type:", typeof data.recent_cheers)
+            console.log("📋 Recent cheers is array?", Array.isArray(data.recent_cheers))
+            if (data.recent_cheers.length > 0) {
+              console.log("📋 First cheer sample:", data.recent_cheers[0])
+            }
+          } else {
+            console.warn("⚠️ No recent_cheers in data:", data)
           }
           this.updateScore(data.score)
           if (data.recent_cheers) {
+            console.log("🔄 Calling updateRecentCheers with", data.recent_cheers.length, "cheers")
             this.updateRecentCheers(data.recent_cheers)
           }
         }
       }
-    )
+      )
+      console.log("✅ ActionCable subscription created")
+    } catch (error) {
+      console.error("❌ Error setting up ActionCable:", error)
+    }
+
     this.updateGauge(this.scoreValue)
 
     // Periodically fetch the current score to handle score decay over time
@@ -68,16 +97,23 @@ export default class extends Controller {
     // Search from document since this.element is just the gauge container
     const list = document.querySelector(".recent-cheers-list")
     if (!list) {
-      console.warn("Recent cheers list not found")
+      console.warn("⚠️ Recent cheers list not found in DOM")
       return
     }
 
-    console.log("Updating recent cheers list with", cheers.length, "cheers")
+    console.log("✅ Updating recent cheers list with", cheers.length, "cheers")
+    console.log("✅ Cheers data:", JSON.stringify(cheers, null, 2))
 
     // Use the formatted location from the server (already formatted consistently)
-    list.innerHTML = cheers.map(cheer => {
-      return `<li class="text-gray-700">🎉 Cheer from ${cheer.formatted_location}!</li>`
+    const html = cheers.map(cheer => {
+      const location = cheer.formatted_location || "unknown location"
+      console.log("✅ Rendering cheer with location:", location)
+      return `<li class="text-gray-700">🎉 Cheer from ${location}!</li>`
     }).join("")
+
+    console.log("✅ Generated HTML:", html)
+    list.innerHTML = html
+    console.log("✅ List updated, new innerHTML length:", list.innerHTML.length)
   }
 
   updateScore(newScore) {

@@ -42,7 +42,8 @@ Rails.application.configure do
   # Mount Action Cable outside main process or domain.
   # config.action_cable.mount_path = nil
   # config.action_cable.url = "wss://example.com/cable"
-  # config.action_cable.allowed_request_origins = [ "http://example.com", /http:\/\/example.*/ ]
+  # Allow ActionCable connections from the same origin (default behavior)
+  config.action_cable.allowed_request_origins = [ /https?:\/\/.*/ ]
 
   # Assume all access to the app is happening through a SSL-terminating reverse proxy.
   # Can be used together with config.force_ssl for Strict-Transport-Security and secure cookies.
@@ -67,8 +68,9 @@ Rails.application.configure do
   # want to log everything, set the level to "debug".
   config.log_level = ENV.fetch("RAILS_LOG_LEVEL", "info")
 
-  # Use Redis cache store in production
-  config.cache_store = :redis_cache_store, { url: ENV.fetch("REDIS_URL") }
+  # Use memory store for Rails.cache (cheer events are stored here)
+  # This avoids needing the redis gem which has Ruby 3.3.0 compatibility issues
+  config.cache_store = :memory_store
 
   # Use a real queuing backend for Active Job (and separate queues per environment).
   # config.active_job.queue_adapter = :resque

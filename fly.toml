@@ -1,13 +1,17 @@
-# fly.toml app configuration file generated for cheerometer on 2025-12-21T16:30:38-05:00
+# fly.toml app configuration file generated for cheerometer on 2025-12-21T16:52:29-05:00
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
 app = 'cheerometer'
-primary_region = 'yyz'
+primary_region = 'ewr'
 console_command = '/rails/bin/rails console'
 
 [build]
+
+[deploy]
+  # No release command needed - we're not using a database
+  # release_command = './bin/rails db:prepare'
 
 [http_service]
   internal_port = 3000
@@ -30,6 +34,10 @@ console_command = '/rails/bin/rails console'
       X-Forwarded-Proto = 'https'
 
 [[vm]]
-  memory = '256mb'
+  memory = '1gb'
   cpus = 1
-  memory_mb = 256
+  memory_mb = 1024
+
+[[statics]]
+  guest_path = '/rails/public'
+  url_prefix = '/'

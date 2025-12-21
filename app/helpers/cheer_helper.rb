@@ -113,13 +113,19 @@ module CheerHelper
     location_text = [city, country].compact.join(", ")
 
     if location_text.present?
-      # Use deterministic selection based on location hash for consistency
-      # This ensures the same location always gets the same format
-      location_hash = location_text.hash
-      should_add_suffix = (location_hash % 10) < 7  # 70% chance, but deterministic
+      # Use cheer_id to add variety - each cheer gets a different suffix even for same location
+      seed = if cheer_id
+        cheer_id.is_a?(String) ? cheer_id.hash : cheer_id.to_i
+      else
+        location_text.hash
+      end
+
+      # 70% chance to add suffix, but varies per cheer
+      should_add_suffix = (seed.abs % 10) < 7
 
       if should_add_suffix
-        suffix_index = location_hash.abs % LOCATION_SUFFIXES.length
+        # Use cheer_id hash to pick different suffix for each cheer
+        suffix_index = seed.abs % LOCATION_SUFFIXES.length
         "#{location_text}, #{LOCATION_SUFFIXES[suffix_index]}"
       else
         location_text

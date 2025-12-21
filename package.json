@@ -14,5 +14,6 @@
     "@rails/actioncable": "^8.0",
     "@tailwindcss/cli": "^4.1.18",
     "tailwindcss": "^4.1.18"
-  }
+  },
+  "packageManager": "yarn@1.22.22"
 }
