@@ -46,7 +46,8 @@ class CheerController < ApplicationController
 
     Rails.logger.debug "Cheer location debug: #{debug_info.inspect}"
 
-    cheer_event = CheerEvent.create!(
+    # Store cheer event in cache
+    cheer_event = CheerEventStore.create(
       ip_address: ip,
       country: country,
       city: city
@@ -54,8 +55,9 @@ class CheerController < ApplicationController
 
     # Broadcast the updated score with location debug info and recent cheers
     score = CheerScore.current
-    recent_cheers = CheerEvent.order(created_at: :desc).limit(5).map do |cheer|
-      { formatted_location: helpers.format_location(cheer.city, cheer.country, cheer.id) }
+    recent_cheers = CheerEventStore.recent(limit: 5).map do |cheer|
+      cheer_id = cheer["id"] || cheer["created_at"]
+      { formatted_location: helpers.format_location(cheer["city"], cheer["country"], cheer_id) }
     end
 
     ActionCable.server.broadcast("cheerometer", {
@@ -70,12 +72,15 @@ class CheerController < ApplicationController
 
   def meter
     @score = CheerScore.current
-    @recent_cheers = CheerEvent.order(created_at: :desc).limit(5)
+    @recent_cheers_data = CheerEventStore.recent(limit: 5)
 
     respond_to do |format|
       format.html
       format.json do
-        recent_cheers = @recent_cheers.map { |cheer| { formatted_location: helpers.format_location(cheer.city, cheer.country, cheer.id) } }
+        recent_cheers = @recent_cheers_data.map do |cheer|
+          cheer_id = cheer["id"] || cheer["created_at"]
+          { formatted_location: helpers.format_location(cheer["city"], cheer["country"], cheer_id) }
+        end
         render json: { score: @score, recent_cheers: recent_cheers }
       end
     end

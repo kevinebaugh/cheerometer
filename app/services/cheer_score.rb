@@ -4,11 +4,11 @@ class CheerScore
 
   def self.current
     now = Time.current
+    window_start = now - WINDOW
 
-    # Get all recent smashes with their timestamps
-    recent_smashes = CheerEvent.where("created_at > ?", now - WINDOW)
-                                .order(created_at: :desc)
-                                .pluck(:created_at)
+    # Get all recent smashes with their timestamps from Redis
+    recent_events = CheerEventStore.recent_since(window_start)
+    recent_smashes = recent_events.map { |e| Time.at(e["created_at"]) }
 
     return 0 if recent_smashes.empty?
 

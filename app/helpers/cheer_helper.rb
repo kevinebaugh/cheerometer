@@ -127,7 +127,12 @@ module CheerHelper
     else
       # For unknown locations, use cheer_id for deterministic selection
       # If no ID provided, fall back to a simple hash
-      seed = cheer_id || Time.current.to_i
+      seed = if cheer_id
+        # Convert to integer if it's a string, or use hash if it's a complex string
+        cheer_id.is_a?(String) ? cheer_id.hash : cheer_id.to_i
+      else
+        Time.current.to_i
+      end
       fallback_index = seed.abs % FALLBACK_LOCATIONS.length
       FALLBACK_LOCATIONS[fallback_index]
     end

@@ -38,9 +38,9 @@
 
   <h2 class="font-bold mb-4 text-xl">Recent Cheers</h2>
   <ul class="space-y-2 recent-cheers-list">
-    <% @recent_cheers.each do |cheer| %>
+    <% @recent_cheers_data.each do |cheer| %>
     <li class="text-gray-700">
-      🎉 Cheer from <%= format_location(cheer.city, cheer.country, cheer.id) %>!
+      🎉 Cheer from <%= format_location(cheer["city"], cheer["country"], cheer["id"] || cheer["created_at"]) %>!
     </li>
     <% end %>
   </ul>
