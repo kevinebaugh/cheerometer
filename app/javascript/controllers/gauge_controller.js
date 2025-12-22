@@ -10,6 +10,11 @@ export default class extends Controller {
 
   connect() {
     console.log("🔌 Gauge controller connected, setting up ActionCable...")
+    console.log("🔌 Initial score value:", this.scoreValue)
+
+    // Initialize local score from initial value
+    this.localScore = this.scoreValue || 0
+    console.log("🔌 Local score initialized to:", this.localScore)
 
     try {
       this.consumer = createConsumer()
@@ -56,6 +61,7 @@ export default class extends Controller {
           } else {
             console.warn("⚠️ No recent_cheers in data:", data)
           }
+          // Update score immediately without delay
           this.updateScore(data.score)
           if (data.recent_cheers) {
             console.log("🔄 Calling updateRecentCheers with", data.recent_cheers.length, "cheers")
@@ -69,7 +75,25 @@ export default class extends Controller {
       console.error("❌ Error setting up ActionCable:", error)
     }
 
-    this.updateGauge(this.scoreValue)
+    this.updateGauge(this.localScore)
+
+    // Listen for button press events for optimistic updates
+    this.buttonPressHandler = (event) => {
+      console.log("🔘 Button smash event received, incrementing optimistically")
+      this.incrementScoreOptimistically()
+    }
+    document.addEventListener("button:smash", this.buttonPressHandler)
+    console.log("✅ Button smash event listener added")
+
+    // Listen for score update events (fallback for immediate updates)
+    this.scoreUpdateHandler = (event) => {
+      if (event.detail && event.detail.score !== undefined) {
+        console.log("📊 Score update event received:", event.detail.score)
+        this.updateScore(event.detail.score)
+        this.localScore = event.detail.score
+      }
+    }
+    document.addEventListener("score:update", this.scoreUpdateHandler)
 
     // Initialize existing locations to fly in after a short delay
     setTimeout(() => {
@@ -111,6 +135,28 @@ export default class extends Controller {
     if (this.scoreInterval) {
       clearInterval(this.scoreInterval)
     }
+    if (this.scoreUpdateHandler) {
+      document.removeEventListener("score:update", this.scoreUpdateHandler)
+    }
+    if (this.buttonPressHandler) {
+      document.removeEventListener("button:smash", this.buttonPressHandler)
+    }
+  }
+
+  incrementScoreOptimistically() {
+    // Immediately increase score locally for instant feedback
+    const currentScore = this.localScore !== undefined ? this.localScore : (this.scoreValue || 0)
+    console.log("📈 Optimistic update - current score:", currentScore)
+    const newScore = Math.min(currentScore + 5, 100) // Add 5 points, cap at 100
+    console.log("📈 Optimistic update - new score:", newScore)
+    this.localScore = newScore
+    this.updateGauge(newScore)
+
+    // Sync with server after a brief delay
+    setTimeout(() => {
+      console.log("🔄 Syncing with server after optimistic update")
+      this.fetchCurrentScore()
+    }, 200)
   }
 
   async fetchCurrentScore() {
@@ -118,7 +164,10 @@ export default class extends Controller {
       const response = await fetch("/cheerometer.json")
       const data = await response.json()
       if (data.score !== undefined) {
-        this.updateScore(data.score)
+        // Only update if server score is different (avoids unnecessary updates)
+        if (data.score !== this.localScore) {
+          this.updateScore(data.score)
+        }
       }
       // Don't update recent cheers on periodic polling - only on new smashes
     } catch (error) {
@@ -188,65 +237,88 @@ export default class extends Controller {
     const viewportWidth = window.innerWidth
     const viewportHeight = window.innerHeight
 
-    // Calculate safe zone around the gauge (center area)
+    // Calculate safe zone around the gauge (center area) - smaller on mobile
     const gaugeCenterX = viewportWidth / 2
-    const gaugeCenterY = viewportHeight / 2 - 100 // Adjust for title
-    const gaugeRadius = 350 // Approximate gauge radius
-    const safeZone = gaugeRadius + 100 // Extra padding
+    const gaugeCenterY = viewportHeight / 2
+    const gaugeRadius = Math.min(viewportWidth, viewportHeight) * 0.25 // Responsive radius
+    const safeZone = gaugeRadius + 50 // Extra padding
 
-    // Estimate text width (rough calculation: ~10px per character + padding)
-    const estimatedTextWidth = (location.length + 3) * 10 + 32 // +3 for emoji, +32 for padding
-    const estimatedHeight = 50 // Height including padding
+    // Temporarily add element to measure actual size
+    element.style.visibility = "hidden"
+    element.style.position = "absolute"
+    element.style.left = "-9999px"
+    container.appendChild(element)
 
-    // Generate random position, avoiding the gauge center area and ensuring it stays on screen
+    // Measure actual dimensions
+    const rect = element.getBoundingClientRect()
+    const actualWidth = rect.width
+    const actualHeight = rect.height
+
+    // Remove temporarily added element
+    container.removeChild(element)
+    element.style.visibility = ""
+
+    // Use actual measured dimensions with safety margin
+    const margin = 10
+    const maxX = viewportWidth - actualWidth - margin
+    const maxY = viewportHeight - actualHeight - margin
+
+    // Generate random position with better distribution
     let x, y
     let attempts = 0
-    const maxAttempts = 100
+    const maxAttempts = 200
 
-    do {
-      // Ensure the element stays within viewport bounds
-      // Account for text width on the right and height on the bottom
-      const maxX = viewportWidth - estimatedTextWidth - 20 // 20px margin
-      const maxY = viewportHeight - estimatedHeight - 20 // 20px margin
+    // Create zones for better distribution (especially on mobile) - ensure they're within bounds
+    const zones = [
+      { xRange: [margin, Math.min(viewportWidth * 0.3, maxX)], yRange: [margin, Math.min(viewportHeight * 0.3, maxY)] }, // Top left
+      { xRange: [Math.max(viewportWidth * 0.7, margin), maxX], yRange: [margin, Math.min(viewportHeight * 0.3, maxY)] }, // Top right
+      { xRange: [margin, Math.min(viewportWidth * 0.3, maxX)], yRange: [Math.max(viewportHeight * 0.7, margin), maxY] }, // Bottom left
+      { xRange: [Math.max(viewportWidth * 0.7, margin), maxX], yRange: [Math.max(viewportHeight * 0.7, margin), maxY] }, // Bottom right
+      { xRange: [margin, maxX], yRange: [margin, Math.min(viewportHeight * 0.25, maxY)] }, // Top edge
+      { xRange: [margin, maxX], yRange: [Math.max(viewportHeight * 0.75, margin), maxY] }, // Bottom edge
+    ]
 
-      x = Math.random() * (maxX - 20) + 20 // 20px margin on left
-      y = Math.random() * (maxY - 20) + 20 // 20px margin on top
-
-      attempts++
-    } while (
-      Math.sqrt(Math.pow(x - gaugeCenterX, 2) + Math.pow(y - gaugeCenterY, 2)) < safeZone &&
-      attempts < maxAttempts
+    // Filter out invalid zones
+    const validZones = zones.filter(zone =>
+      zone.xRange[0] < zone.xRange[1] &&
+      zone.yRange[0] < zone.yRange[1] &&
+      zone.xRange[1] <= maxX &&
+      zone.yRange[1] <= maxY
     )
 
-    // If we couldn't find a good spot, place it in a corner area
-    if (attempts >= maxAttempts) {
-      // Try corners first
-      const corners = [
-        { x: 20, y: 20 }, // Top left
-        { x: viewportWidth - estimatedTextWidth - 20, y: 20 }, // Top right
-        { x: 20, y: viewportHeight - estimatedHeight - 20 }, // Bottom left
-        { x: viewportWidth - estimatedTextWidth - 20, y: viewportHeight - estimatedHeight - 20 } // Bottom right
-      ]
+    // Randomly pick a zone for better distribution
+    const randomZone = validZones.length > 0
+      ? validZones[Math.floor(Math.random() * validZones.length)]
+      : { xRange: [margin, maxX], yRange: [margin, maxY] } // Fallback to full screen
 
-      // Find a corner that's not in the safe zone
-      const validCorner = corners.find(corner => {
-        const distance = Math.sqrt(Math.pow(corner.x - gaugeCenterX, 2) + Math.pow(corner.y - gaugeCenterY, 2))
-        return distance >= safeZone
-      })
+    do {
+      // Generate position within the selected zone
+      x = Math.random() * (randomZone.xRange[1] - randomZone.xRange[0]) + randomZone.xRange[0]
+      y = Math.random() * (randomZone.yRange[1] - randomZone.yRange[0]) + randomZone.yRange[0]
 
-      if (validCorner) {
-        x = validCorner.x
-        y = validCorner.y
-      } else {
-        // Fallback: place it safely on the edge
-        x = Math.max(20, Math.min(viewportWidth - estimatedTextWidth - 20, viewportWidth / 4))
-        y = Math.max(20, Math.min(viewportHeight - estimatedHeight - 20, viewportHeight / 4))
+      // Ensure it's within bounds
+      x = Math.max(margin, Math.min(maxX, x))
+      y = Math.max(margin, Math.min(maxY, y))
+
+      attempts++
+
+      // Check if position is outside safe zone
+      const distance = Math.sqrt(Math.pow(x - gaugeCenterX, 2) + Math.pow(y - gaugeCenterY, 2))
+      if (distance >= safeZone) {
+        break
       }
-    }
 
-    // Ensure final position is within bounds
-    x = Math.max(20, Math.min(viewportWidth - estimatedTextWidth - 20, x))
-    y = Math.max(20, Math.min(viewportHeight - estimatedHeight - 20, y))
+      // If we've tried too many times, try a different zone
+      if (attempts > 50 && attempts % 50 === 0 && validZones.length > 1) {
+        const newZone = validZones[Math.floor(Math.random() * validZones.length)]
+        randomZone.xRange = newZone.xRange
+        randomZone.yRange = newZone.yRange
+      }
+    } while (attempts < maxAttempts)
+
+    // Final bounds check with actual dimensions
+    x = Math.max(margin, Math.min(maxX, x))
+    y = Math.max(margin, Math.min(maxY, y))
 
     element.style.left = `${x}px`
     element.style.top = `${y}px`
@@ -275,6 +347,7 @@ export default class extends Controller {
 
   updateScore(newScore) {
     this.scoreValue = newScore
+    this.localScore = newScore
     this.updateGauge(newScore)
   }
 
@@ -284,10 +357,9 @@ export default class extends Controller {
 
     if (gauge) {
       // Calculate the dash offset for the gauge arc
-      // The arc length is approximately 314.16 (π * 100 radius)
-      // We want to show the percentage of the arc
       const arcLength = 314.16
       const offset = arcLength - (score / 100) * arcLength
+      // Update immediately - no transition delay
       gauge.style.strokeDashoffset = offset
     }
 

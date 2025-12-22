@@ -119,4 +119,9 @@ class CheerController < ApplicationController
       end
     end
   end
+
+  def combined
+    @score = CheerScore.current
+    @recent_cheers_data = CheerEventStore.recent(limit: 5)
+  end
 end
