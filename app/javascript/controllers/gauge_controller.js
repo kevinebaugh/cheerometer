@@ -178,6 +178,10 @@ export default class extends Controller {
       border-radius: 20px;
       backdrop-filter: blur(4px);
       border: 2px solid rgba(255, 255, 255, 0.3);
+      user-select: none;
+      -webkit-user-select: none;
+      -moz-user-select: none;
+      -ms-user-select: none;
     `
 
     // Get viewport dimensions

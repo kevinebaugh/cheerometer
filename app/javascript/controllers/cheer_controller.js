@@ -1,6 +1,27 @@
 import { Controller } from "@hotwired/stimulus"
 
 export default class extends Controller {
+  connect() {
+    // Add touch event handlers for 3D press effect on mobile
+    this.element.addEventListener("touchstart", this.handleTouchStart.bind(this), { passive: true })
+    this.element.addEventListener("touchend", this.handleTouchEnd.bind(this), { passive: true })
+    this.element.addEventListener("touchcancel", this.handleTouchEnd.bind(this), { passive: true })
+  }
+
+  disconnect() {
+    this.element.removeEventListener("touchstart", this.handleTouchStart)
+    this.element.removeEventListener("touchend", this.handleTouchEnd)
+    this.element.removeEventListener("touchcancel", this.handleTouchEnd)
+  }
+
+  handleTouchStart(e) {
+    this.element.classList.add("pressed")
+  }
+
+  handleTouchEnd(e) {
+    this.element.classList.remove("pressed")
+  }
+
   async smash() {
     // Trigger confetti celebration
     const confettiContainer = document.querySelector("[data-controller*='confetti']")
