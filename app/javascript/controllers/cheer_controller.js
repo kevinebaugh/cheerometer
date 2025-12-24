@@ -116,24 +116,32 @@ export default class extends Controller {
     }
 
     // Do async work (geolocation + fetch) in background, don't block
-    this.performSmash()
+    this.smash()
   }
 
-  async performSmash() {
-    // Try to get geolocation, fallback to IP-based
+  async smash() {
+    console.log("🚀 [CHEER] Starting smash()")
+
+    // Try to get geolocation with a short timeout - don't block too long
     let locationData = null
 
     try {
-      const position = await this.getCurrentPosition()
+      console.log("📍 [CHEER] Requesting geolocation (with 300ms timeout)...")
+      // Use Promise.race to timeout geolocation very quickly - don't block the request
+      const position = await Promise.race([
+        this.getCurrentPosition(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Geolocation timeout")), 300)) // 300ms timeout - very fast
+      ])
+      console.log("✅ [CHEER] Geolocation success:", position.coords.latitude, position.coords.longitude)
       locationData = {
         latitude: position.coords.latitude,
         longitude: position.coords.longitude
       }
     } catch (error) {
-      // Geolocation not available or denied, will fallback to IP-based
-      console.log("Geolocation not available, using IP-based location")
+      console.log("⚠️ [CHEER] Geolocation not available quickly:", error.message, "- sending request immediately without it")
     }
 
+    // Send request with location data if available
     const headers = {
       "X-CSRF-Token": document.querySelector('meta[name="csrf-token"]')?.content || ""
     }
@@ -147,32 +155,37 @@ export default class extends Controller {
     if (locationData) {
       headers["Content-Type"] = "application/json"
       options.body = JSON.stringify(locationData)
+      console.log("📤 [CHEER] Sending request WITH geolocation data:", locationData)
+    } else {
+      console.log("📤 [CHEER] Sending request WITHOUT geolocation data (IP fallback)")
     }
 
-    const response = await fetch("/cheer", options)
-
-    // Fetch updated score after smash as fallback
-    if (response.ok) {
-      // Fetch score after a brief delay to ensure server processed
-      setTimeout(async () => {
-        try {
-          const scoreResponse = await fetch("/cheerometer.json")
-          const scoreData = await scoreResponse.json()
-          if (scoreData.score !== undefined) {
-            // Dispatch event for gauge controller to update
-            const event = new CustomEvent("score:update", { detail: { score: scoreData.score } })
-            document.dispatchEvent(event)
-          }
-        } catch (error) {
-          console.error("Error fetching score after smash:", error)
-        }
-      }, 50)
+    // Send request immediately - don't wait for anything
+    try {
+      const response = await fetch("/cheer", options)
+      console.log("✅ [CHEER] Request completed, status:", response.status)
+    } catch (error) {
+      console.error("❌ [CHEER] Request failed:", error)
     }
   }
 
-  // Keep this for Stimulus data-action binding if it's used
-  async smash() {
-    this.handleSmash()
+  getCurrentPosition() {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(new Error("Geolocation not supported"))
+        return
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        resolve,
+        reject,
+        {
+          enableHighAccuracy: false,
+          timeout: 2000, // Very short timeout - 2 seconds max
+          maximumAge: 300000 // Cache for 5 minutes - use cached location if available
+        }
+      )
+    })
   }
 
   playBellSound() {
@@ -214,58 +227,6 @@ export default class extends Controller {
 
       oscillator.start(this.audioContext.currentTime + (index * 0.05))
       oscillator.stop(this.audioContext.currentTime + duration + (index * 0.05))
-    })
-  }
-
-  async getCurrentPosition() {
-    if (!navigator.geolocation) {
-      throw new Error("Geolocation not supported")
-    }
-
-    // Check permission state first
-    if (navigator.permissions && navigator.permissions.query) {
-      try {
-        const permissionStatus = await navigator.permissions.query({ name: 'geolocation' })
-
-        if (permissionStatus.state === 'denied') {
-          throw new Error("Geolocation permission denied")
-        }
-
-        if (permissionStatus.state === 'prompt') {
-          // Permission hasn't been asked yet - this will trigger the prompt
-          console.log("📍 Requesting geolocation permission...")
-        }
-      } catch (e) {
-        // Permissions API might not be supported, continue anyway
-        console.log("📍 Permissions API not available, proceeding with geolocation request")
-      }
-    }
-
-    return new Promise((resolve, reject) => {
-      navigator.geolocation.getCurrentPosition(
-        resolve,
-        (error) => {
-          // Provide more specific error messages
-          if (error.code === error.PERMISSION_DENIED) {
-            console.log("📍 Geolocation permission denied by user")
-            reject(new Error("Permission denied"))
-          } else if (error.code === error.POSITION_UNAVAILABLE) {
-            console.log("📍 Geolocation position unavailable")
-            reject(new Error("Position unavailable"))
-          } else if (error.code === error.TIMEOUT) {
-            console.log("📍 Geolocation request timed out")
-            reject(new Error("Request timeout"))
-          } else {
-            console.log("📍 Geolocation error:", error.message)
-            reject(error)
-          }
-        },
-        {
-          enableHighAccuracy: false,
-          timeout: 5000,
-          maximumAge: 0 // Don't use cached location - always request fresh permission if needed
-        }
-      )
     })
   }
 }

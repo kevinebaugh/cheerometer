@@ -45,4 +45,22 @@ class CheerEventStore
   def self.count_since(time)
     recent_since(time).count
   end
+
+  def self.update_location(event_id, country:, city:)
+    return false if event_id.blank?
+
+    events = Rails.cache.fetch(CACHE_KEY) { [] }
+    event_index = events.rindex { |e| e["id"] == event_id }
+
+    if event_index
+      events[event_index]["country"] = country
+      events[event_index]["city"] = city
+      Rails.cache.write(CACHE_KEY, events)
+      Rails.logger.info "✅ [STORE] Updated location for event #{event_id}: city=#{city.inspect}, country=#{country.inspect}"
+      true
+    else
+      Rails.logger.warn "⚠️ [STORE] Event #{event_id} not found for location update"
+      false
+    end
+  end
 end

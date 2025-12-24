@@ -19,19 +19,20 @@ export default class extends Controller {
   createConfettiBurst(score) {
     const container = this.element
 
-    // Minimal emojis until 100 is hit
-    // At 100, show a big celebration
-    let confettiCount
+    // Reduced confetti for performance - only show when hitting 100, and limit amount
+    let confettiCount = 0
     if (score >= 100) {
-      // Big celebration at 100!
-      confettiCount = 100
-    } else {
-      // No emojis until 100 is reached - keep it minimal
-      confettiCount = 0
+      // Reduced celebration at 100 for better performance (was 100, now 20)
+      confettiCount = 20
+    }
+
+    // Only create confetti if count > 0
+    if (confettiCount === 0) {
+      return
     }
 
     // Batch creation to reduce setTimeout overhead
-    const batchSize = 5
+    const batchSize = 3 // Reduced batch size
     let created = 0
 
     const createBatch = () => {
@@ -42,7 +43,7 @@ export default class extends Controller {
       created = batchEnd
 
       if (created < confettiCount) {
-        setTimeout(createBatch, 50) // Create next batch after 50ms
+        setTimeout(createBatch, 100) // Slower batch creation for better performance
       }
     }
 

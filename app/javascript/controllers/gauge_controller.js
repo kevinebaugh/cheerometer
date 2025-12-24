@@ -14,11 +14,12 @@ export default class extends Controller {
 
     // Initialize local score from initial value
     this.localScore = this.scoreValue || 0
+    this.lastSyncedScore = this.scoreValue || 0 // Track last synced score for smoothing
     console.log("🔌 Local score initialized to:", this.localScore)
 
-    // Track unique locations and their timestamps (persist for 2 hours)
-    this.uniqueLocations = new Map() // Map of location -> { element, timestamp }
-    this.locationExpiryTime = 2 * 60 * 60 * 1000 // 2 hours in milliseconds
+    // Track unique locations and their timestamps (fade out after 10 seconds)
+    this.uniqueLocations = new Map() // Map of location -> { element, timestamp, fadeTimeout }
+    this.locationExpiryTime = 10 * 1000 // 10 seconds in milliseconds
 
     try {
       this.consumer = createConsumer()
@@ -37,42 +38,65 @@ export default class extends Controller {
             console.error("❌ ActionCable subscription rejected")
           },
           received: (data) => {
-          console.log("🎉 SMASH! New cheer received, score:", data.score)
+          console.log("🎉 [GAUGE] ActionCable message received")
+          console.log("📊 [GAUGE] Score:", data.score)
+          console.log("📦 [GAUGE] Full data:", JSON.stringify(data, null, 2))
 
-          // Trigger confetti celebration with current score
+          // Only trigger confetti if score increased to 100 (not if already at 100)
+          // This prevents performance issues from repeated confetti at 100
           const confettiContainer = document.querySelector("[data-controller*='confetti']")
           if (confettiContainer) {
             const currentScore = this.localScore !== undefined ? this.localScore : (this.scoreValue || 0)
-            confettiContainer.dispatchEvent(new CustomEvent("cheer:celebrate", {
-              detail: { score: currentScore }
-            }))
+            const newScore = data.score || currentScore
+
+            // Only trigger confetti if we just hit 100 (was below 100, now at 100)
+            if (currentScore < 100 && newScore >= 100) {
+              confettiContainer.dispatchEvent(new CustomEvent("cheer:celebrate", {
+                detail: { score: newScore }
+              }))
+            }
           }
 
-          if (data.location) {
-            console.log("📍 Location:", {
-              city: data.location.city || "unknown",
-              country: data.location.country || "unknown",
-              source: data.location.source || "unknown"
-            })
-          }
-          if (data.debug) {
-            console.log("🔍 Location Debug Info:", data.debug)
-          }
+          // Check for recent_cheers
           if (data.recent_cheers) {
-            console.log("📋 Recent cheers received:", data.recent_cheers)
-            console.log("📋 Recent cheers type:", typeof data.recent_cheers)
-            console.log("📋 Recent cheers is array?", Array.isArray(data.recent_cheers))
+            console.log("✅ [GAUGE] recent_cheers exists")
+            console.log("📋 [GAUGE] recent_cheers type:", typeof data.recent_cheers)
+            console.log("📋 [GAUGE] recent_cheers is array?", Array.isArray(data.recent_cheers))
+            console.log("📋 [GAUGE] recent_cheers length:", data.recent_cheers?.length)
+            console.log("📋 [GAUGE] recent_cheers full:", JSON.stringify(data.recent_cheers, null, 2))
+
             if (data.recent_cheers.length > 0) {
-              console.log("📋 First cheer sample:", data.recent_cheers[0])
+              console.log("📋 [GAUGE] First cheer:", JSON.stringify(data.recent_cheers[0], null, 2))
+              console.log("📋 [GAUGE] First cheer keys:", Object.keys(data.recent_cheers[0] || {}))
+              console.log("📋 [GAUGE] First cheer formatted_location:", data.recent_cheers[0]?.formatted_location)
+            } else {
+              console.warn("⚠️ [GAUGE] recent_cheers array is empty")
             }
           } else {
-            console.warn("⚠️ No recent_cheers in data:", data)
+            console.warn("❌ [GAUGE] No recent_cheers in data!")
+            console.log("📦 [GAUGE] Available keys:", Object.keys(data || {}))
           }
-          // Update score immediately without delay
-          this.updateScore(data.score)
-          if (data.recent_cheers) {
-            console.log("🔄 Calling updateRecentCheers with", data.recent_cheers.length, "cheers")
+
+          // ActionCable sync - always accept significant changes
+          // Use same smoothing logic as polling to prevent jumps
+          if (data.score !== undefined && data.score !== null) {
+            const currentScore = this.localScore !== undefined ? this.localScore : (this.scoreValue || 0)
+            const scoreDiff = data.score - currentScore
+
+            // Only update if change is significant to prevent erratic jumps
+            if (Math.abs(scoreDiff) > 0.5) {
+              this.updateScore(data.score)
+              this.lastSyncedScore = data.score
+              console.log(`🔄 [GAUGE] ActionCable: ${currentScore} → ${data.score}`)
+            }
+          }
+
+          // Process recent cheers
+          if (data.recent_cheers && Array.isArray(data.recent_cheers) && data.recent_cheers.length > 0) {
+            console.log("🔄 [GAUGE] Calling updateRecentCheers with", data.recent_cheers.length, "cheers")
             this.updateRecentCheers(data.recent_cheers)
+          } else {
+            console.warn("⚠️ [GAUGE] Not calling updateRecentCheers - invalid data")
           }
         }
       }
@@ -107,21 +131,21 @@ export default class extends Controller {
       this.initializeExistingLocations()
     }, 500)
 
-    // Periodically fetch the current score to handle score decay over time
-    // Poll more frequently for smooth gradual decay
+    // SIMPLIFIED: Server is the single source of truth - poll frequently
+    // All devices must stay in sync, so we poll every 100ms
+    // This is the primary sync mechanism - simple and reliable
+    // Server now responds instantly, so we can poll more frequently
     this.scoreInterval = setInterval(() => {
       this.fetchCurrentScore()
-    }, 200) // Update every 200ms for smooth gradual decay
+    }, 100) // Poll every 100ms for very close sync across all devices
 
-    // Also do gradual local decay between server updates for ultra-smooth experience
-    this.decayInterval = setInterval(() => {
-      this.gradualDecay()
-    }, 100) // Update every 100ms for continuous decay
+    // Client-side decay is completely disabled - server handles everything
+    // No local decay to cause drift
 
-    // Periodically clean up expired locations
+    // Periodically clean up expired locations (check every second for 10-second expiry)
     this.locationCleanupInterval = setInterval(() => {
       this.cleanupExpiredLocations()
-    }, 60000) // Check every minute for expired locations
+    }, 1000) // Check every second for expired locations
   }
 
   initializeExistingLocations() {
@@ -167,94 +191,28 @@ export default class extends Controller {
   }
 
   incrementScoreOptimistically() {
-    // Get the CURRENT displayed score (even if animation is in progress)
-    const scoreText = this.element.querySelector(".gauge-score")
-    let currentScore = this.localScore !== undefined ? this.localScore : (this.scoreValue || 0)
+    // SIMPLIFIED: No optimistic updates - just trigger confetti and let server handle score
+    // This ensures all devices stay perfectly in sync
+    console.log("📈 Button smashed - waiting for server response")
 
-    // If there's a displayed score, use that (it might be mid-animation)
-    if (scoreText && scoreText.textContent) {
-      const displayedScore = parseInt(scoreText.textContent)
-      if (!isNaN(displayedScore)) {
-        currentScore = displayedScore
-      }
-    }
-
-    console.log("📈 Optimistic update - current score:", currentScore)
-
-    // Don't do optimistic score increment - the server calculation is complex
-    // (logarithmic scaling, exponential decay, progressive penalties)
-    // We can't accurately predict it on the client, so just fetch immediately
-    // This eliminates the mismatch between optimistic and server-side updates
-
-    // Trigger confetti immediately (but minimal since score hasn't changed)
+    // Trigger confetti immediately for visual feedback
     const confettiContainer = document.querySelector("[data-controller*='confetti']")
     if (confettiContainer) {
+      const currentScore = this.localScore !== undefined ? this.localScore : (this.scoreValue || 0)
       confettiContainer.dispatchEvent(new CustomEvent("cheer:celebrate", {
         detail: { score: currentScore }
       }))
     }
 
-    // Sync with server immediately to get accurate score
-    // Don't wait - get the real score as fast as possible
+    // Immediately fetch server score - polling will catch it within 200ms
+    // This is simpler and more reliable than optimistic updates
     this.fetchCurrentScore()
   }
 
   gradualDecay() {
-    // Gradually decay the score locally between server updates
-    // Total decay time: ~10 minutes
-    // 100-99: quick (~10-15 seconds)
-    // 99-0: much slower (~9.5 minutes)
-    const currentScore = this.localScore !== undefined ? this.localScore : (this.scoreValue || 0)
-
-    // Only decay if score is above 0
-    if (currentScore > 0) {
-      // Track when we first hit 100 to add a delay before decay starts
-      if (currentScore >= 100 && !this.reached100At) {
-        this.reached100At = Date.now()
-        return // Stay at 100 for a bit
-      }
-
-      // If we're at 100, check if we should start decaying
-      if (currentScore >= 100 && this.reached100At) {
-        const timeAt100 = Date.now() - this.reached100At
-        const holdTime = 5000 // Stay at 100 for 5 seconds
-        if (timeAt100 < holdTime) {
-          return // Still holding at 100
-        }
-      }
-
-      // Reset the 100 flag if we're below 100
-      if (currentScore < 100) {
-        this.reached100At = null
-      }
-
-      // Variable decay rate based on score range
-      // Target: 100-99 in ~10-15 seconds, then 99-0 in ~9.5 minutes
-      // 100-99: 1 point in 10-15 seconds = 0.0067-0.01 per 100ms
-      // 99-0: 99 points in 9.5 minutes = 99 points in 570 seconds = 0.0174 per second = 0.00174 per 100ms
-      let decayRate
-      if (currentScore >= 99) {
-        // 100-99: quick decay (~10-15 seconds for 1 point)
-        // 1 point / 12 seconds = 0.0083 per second = 0.00083 per 100ms
-        decayRate = 0.008 // Quick: 100-99 (~12 seconds)
-      } else {
-        // 99-0: much slower decay (~9.5 minutes for 99 points)
-        // 99 points / 570 seconds = 0.1737 per second = 0.01737 per 100ms
-        // But we want it slower, so: 99 points / 570 seconds = 0.00174 per 100ms
-        decayRate = 0.0017 // Much slower: 99-0 (~9.5 minutes)
-      }
-
-      const newScore = Math.max(0, currentScore - decayRate)
-
-      // Only update if there's a meaningful change (avoid micro-updates)
-      if (Math.abs(newScore - currentScore) >= 0.05) {
-        // Update gauge smoothly without triggering full animation
-        this.updateGaugeSmoothly(newScore)
-      }
-    } else {
-      // Reset the 100 flag when at 0
-      this.reached100At = null
-    }
+    // DISABLED - server handles all decay
+    // No client-side decay to cause drift
+    return
   }
 
   updateGaugeSmoothly(targetScore) {
@@ -297,68 +255,100 @@ export default class extends Controller {
     try {
       const response = await fetch("/cheerometer.json")
       const data = await response.json()
-      if (data.score !== undefined) {
-        // Sync with server score, but only if there's a significant difference
-        // This prevents jarring jumps when server score differs from local decay
+      if (data.score !== undefined && data.score !== null) {
         const currentScore = this.localScore !== undefined ? this.localScore : (this.scoreValue || 0)
-        const scoreDiff = Math.abs(data.score - currentScore)
+        const scoreDiff = data.score - currentScore
 
-        // Only update if server score is significantly different (more than 2 points)
-        // This allows local gradual decay to work smoothly
-        if (scoreDiff > 2) {
+        // Smooth out erratic jumps - only update if change is significant or consistent
+        // This prevents rapid back-and-forth jumps while maintaining sync
+        if (Math.abs(scoreDiff) > 0.5) {
+          // Significant change - update immediately
           this.updateScore(data.score)
-        } else {
-          // Small difference - just sync the local score without animation
-          this.localScore = data.score
-          this.scoreValue = data.score
+          this.lastSyncedScore = data.score
+        } else if (Math.abs(scoreDiff) > 0.1) {
+          // Small change - only update if it's in the same direction as last change
+          // This prevents rapid oscillation
+          const lastDiff = data.score - this.lastSyncedScore
+          if (Math.abs(lastDiff) < 0.5 || (scoreDiff > 0 && lastDiff > 0) || (scoreDiff < 0 && lastDiff < 0)) {
+            this.updateScore(data.score)
+            this.lastSyncedScore = data.score
+          }
         }
       }
-      // Don't update recent cheers on periodic polling - only on new smashes
     } catch (error) {
       console.error("Error fetching score:", error)
     }
   }
 
   updateRecentCheers(cheers) {
+    console.log("🎯 [UPDATE] updateRecentCheers called")
+    console.log("📥 [UPDATE] Input cheers:", JSON.stringify(cheers, null, 2))
+
     const container = document.querySelector(".flying-locations-container")
     if (!container) {
-      console.warn("⚠️ Flying locations container not found in DOM")
+      console.error("❌ [UPDATE] Flying locations container not found in DOM")
+      return
+    }
+    console.log("✅ [UPDATE] Container found")
+
+    if (!cheers) {
+      console.error("❌ [UPDATE] cheers is null/undefined")
       return
     }
 
-    console.log("✅ Creating flying locations for", cheers.length, "cheers")
-    console.log("✅ Cheers data:", JSON.stringify(cheers, null, 2))
+    if (!Array.isArray(cheers)) {
+      console.error("❌ [UPDATE] cheers is not an array, type:", typeof cheers)
+      return
+    }
 
-    // Get the newest cheer (first in the array)
-    if (cheers.length > 0) {
-      const newestCheer = cheers[0]
-      console.log("✅ Newest cheer object:", newestCheer)
-      console.log("✅ Newest cheer keys:", Object.keys(newestCheer || {}))
+    if (cheers.length === 0) {
+      console.warn("⚠️ [UPDATE] cheers array is empty")
+      return
+    }
 
-      // Try multiple possible property names
-      const location = newestCheer.formatted_location ||
-                       newestCheer.location ||
-                       newestCheer.formattedLocation ||
-                       (newestCheer.city && newestCheer.country ? `${newestCheer.city}, ${newestCheer.country}` : null) ||
-                       "unknown location"
+    console.log("✅ [UPDATE] Processing", cheers.length, "cheers")
 
-      console.log("✅ Creating flying location:", location)
+    // Get the newest cheer (first in the array - most recent)
+    const newestCheer = cheers[0]
+    console.log("📋 [UPDATE] Newest cheer:", JSON.stringify(newestCheer, null, 2))
+    console.log("📋 [UPDATE] Newest cheer keys:", Object.keys(newestCheer || {}))
+    console.log("📋 [UPDATE] Newest cheer formatted_location:", newestCheer?.formatted_location)
+    console.log("📋 [UPDATE] Newest cheer location:", newestCheer?.location)
+    console.log("📋 [UPDATE] Newest cheer formattedLocation:", newestCheer?.formattedLocation)
 
-      // Create a flying location element
-      if (location && location !== "unknown location") {
-        this.createFlyingLocation(location)
-      } else {
-        console.warn("⚠️ No valid location found in cheer data")
-      }
+    // Try multiple possible property names
+    const formattedLocation = newestCheer?.formatted_location ||
+                              newestCheer?.location ||
+                              newestCheer?.formattedLocation ||
+                              null
+
+    console.log("🔍 [UPDATE] Extracted formattedLocation:", formattedLocation)
+    console.log("🔍 [UPDATE] formattedLocation type:", typeof formattedLocation)
+    console.log("🔍 [UPDATE] formattedLocation truthy?", !!formattedLocation)
+    if (formattedLocation) {
+      console.log("🔍 [UPDATE] formattedLocation.trim():", formattedLocation.trim())
+      console.log("🔍 [UPDATE] formattedLocation.trim() length:", formattedLocation.trim().length)
+    }
+
+    // Show fly-in if we have a location
+    if (formattedLocation && formattedLocation.trim()) {
+      console.log("✅ [UPDATE] Creating flying location:", formattedLocation)
+      this.createFlyingLocation(formattedLocation)
+    } else {
+      console.error("❌ [UPDATE] No valid location found!")
+      console.error("   - formattedLocation:", formattedLocation)
+      console.error("   - newestCheer:", JSON.stringify(newestCheer, null, 2))
     }
   }
 
   createFlyingLocation(location) {
+    console.log("🎯 createFlyingLocation called with:", location)
     const container = document.querySelector(".flying-locations-container")
     if (!container) {
       console.warn("⚠️ Flying locations container not found")
       return
     }
+    console.log("✅ Container found:", container)
 
     if (!location || !location.trim()) {
       console.warn("⚠️ No location provided to createFlyingLocation")
@@ -370,43 +360,72 @@ export default class extends Controller {
     const isNewLocation = !existingLocation
     const now = Date.now()
 
+    console.log("📍 Location exists?", !!existingLocation, "isNew?", isNewLocation)
+
     if (existingLocation) {
-      // Location already exists - update its timestamp and refresh it
+      // Location already exists - cancel existing fade timeout and refresh it
+      console.log("🔄 Updating existing location:", location)
+      if (existingLocation.fadeTimeout) {
+        clearTimeout(existingLocation.fadeTimeout)
+      }
+
+      // Reset timestamp and restart fade timer
       existingLocation.timestamp = now
       // Make it briefly more visible to show it's been updated
+      // Preserve rotation angle from stored data
+      const rotation = existingLocation.rotation || 0
       existingLocation.element.style.opacity = "1"
-      existingLocation.element.style.transform = "scale(1.1)"
+      existingLocation.element.style.transform = `scale(1.1) rotate(${rotation}deg)`
       setTimeout(() => {
         if (existingLocation.element.parentNode) {
-          existingLocation.element.style.transform = "scale(1)"
+          existingLocation.element.style.transform = `scale(1) rotate(${rotation}deg)`
         }
       }, 300)
+
+      // Schedule new fade out after 10 seconds
+      existingLocation.fadeTimeout = setTimeout(() => {
+        this.fadeOutLocation(location, existingLocation.element)
+      }, this.locationExpiryTime)
+
       return
     }
 
     // Create the element for a new unique location
+    // Format: "Cheer from [location], [suffix]" (suffix is already included in location string)
     const element = document.createElement("div")
     element.className = "flying-location"
-    element.textContent = `🎉 ${location}`
+    element.textContent = `Cheer from ${location}`
+
+    // Random rotation angle for visual variety (between -15 and +15 degrees for readability)
+    const randomAngle = (Math.random() * 30) - 15 // -15 to +15 degrees
+
+    // Check if mobile (viewport width < 768px)
+    const isMobile = window.innerWidth < 768
+
     element.style.cssText = `
       position: absolute;
-      font-size: 1.5rem;
+      font-size: ${isMobile ? '1rem' : '1.5rem'};
       font-weight: bold;
       color: white;
       text-shadow: 3px 3px 6px rgba(0,0,0,0.8), -1px -1px 2px rgba(0,0,0,0.5);
-      white-space: nowrap;
+      ${isMobile ? 'white-space: normal; line-height: 1.2;' : 'white-space: nowrap;'}
       pointer-events: none;
       opacity: 0;
-      transform: scale(0.5);
+      transform: scale(0.5) rotate(${randomAngle}deg);
       background: rgba(0, 0, 0, 0.4);
-      padding: 8px 16px;
-      border-radius: 20px;
+      padding: ${isMobile ? '6px 10px' : '8px 16px'};
+      border-radius: ${isMobile ? '12px' : '20px'};
       backdrop-filter: blur(4px);
       border: 2px solid rgba(255, 255, 255, 0.3);
       user-select: none;
       -webkit-user-select: none;
       -moz-user-select: none;
       -ms-user-select: none;
+      width: ${isMobile ? 'auto' : 'auto'};
+      max-width: ${isMobile ? '200px' : 'none'};
+      min-width: fit-content;
+      overflow: visible;
+      text-align: center;
     `
 
     // Get viewport dimensions
@@ -518,61 +537,62 @@ export default class extends Controller {
     element.style.left = `${x}px`
     element.style.top = `${y}px`
 
+    console.log("✅ Adding element to container at position:", x, y, "text:", element.textContent)
     container.appendChild(element)
 
-    // Store in unique locations map with timestamp
-    this.uniqueLocations.set(location, { element: element, timestamp: now })
+    // Store in unique locations map with timestamp and rotation angle
+    const locationData = { element: element, timestamp: now, fadeTimeout: null, rotation: randomAngle }
+    this.uniqueLocations.set(location, locationData)
+    console.log("✅ Location added to uniqueLocations map. Total locations:", this.uniqueLocations.size)
 
-    // Animate flying in
+    // Animate flying in with rotation
     requestAnimationFrame(() => {
+      console.log("🎬 Animating element in")
       element.style.transition = "all 0.8s cubic-bezier(0.34, 1.56, 0.64, 1)"
       element.style.opacity = "1"
-      element.style.transform = "scale(1)"
+      element.style.transform = `scale(1) rotate(${randomAngle}deg)`
+      console.log("✅ Element should now be visible. Opacity:", element.style.opacity, "Transform:", element.style.transform)
     })
 
-    // For unique locations, keep them visible for 2 hours instead of 5 seconds
-    // Schedule removal after 2 hours
-    setTimeout(() => {
-      const locationData = this.uniqueLocations.get(location)
-      if (locationData && locationData.element === element) {
-        // Check if timestamp is still valid (hasn't been refreshed)
-        const age = Date.now() - locationData.timestamp
-        if (age >= this.locationExpiryTime) {
-          // Fade out and remove
-          element.style.transition = "all 1s ease-out"
-          element.style.opacity = "0"
-          element.style.transform = "scale(0.8) translateY(-20px)"
-          setTimeout(() => {
-            if (element.parentNode) {
-              element.parentNode.removeChild(element)
-            }
-            this.uniqueLocations.delete(location)
-          }, 1000)
-        }
-      }
+    // Schedule fade out after 10 seconds
+    locationData.fadeTimeout = setTimeout(() => {
+      this.fadeOutLocation(location, element)
     }, this.locationExpiryTime)
   }
 
+  fadeOutLocation(location, element) {
+    const locationData = this.uniqueLocations.get(location)
+    if (!locationData || locationData.element !== element) {
+      return // Location was already removed or refreshed
+    }
+
+    console.log("🌅 Fading out location:", location)
+
+    // Fade out and remove
+    element.style.transition = "all 1s ease-out"
+    element.style.opacity = "0"
+    element.style.transform = "scale(0.8) translateY(-20px)"
+
+    setTimeout(() => {
+      if (element.parentNode) {
+        element.parentNode.removeChild(element)
+      }
+      this.uniqueLocations.delete(location)
+      console.log("🗑️ Location removed:", location)
+    }, 1000)
+  }
+
   cleanupExpiredLocations() {
-    // Periodically clean up expired locations
+    // Periodically clean up expired locations (backup cleanup)
     const now = Date.now()
     for (const [location, data] of this.uniqueLocations.entries()) {
       const age = now - data.timestamp
       if (age >= this.locationExpiryTime) {
-        // Remove expired location
-        if (data.element.parentNode) {
-          data.element.style.transition = "all 1s ease-out"
-          data.element.style.opacity = "0"
-          data.element.style.transform = "scale(0.8) translateY(-20px)"
-          setTimeout(() => {
-            if (data.element.parentNode) {
-              data.element.parentNode.removeChild(data.element)
-            }
-            this.uniqueLocations.delete(location)
-          }, 1000)
-        } else {
-          this.uniqueLocations.delete(location)
+        // Cancel any existing timeout and fade out immediately
+        if (data.fadeTimeout) {
+          clearTimeout(data.fadeTimeout)
         }
+        this.fadeOutLocation(location, data.element)
       }
     }
   }
@@ -584,10 +604,12 @@ export default class extends Controller {
   }
 
   updateGauge(targetScore) {
+    // SIMPLIFIED: Always update immediately - no animations for perfect sync
+    // This ensures all devices show the exact same score at the same time
     const gauge = this.element.querySelector(".gauge-fill")
     const scoreText = this.element.querySelector(".gauge-score")
 
-    // Cancel any existing animation
+    // Cancel any existing animations
     if (this.animationFrame) {
       cancelAnimationFrame(this.animationFrame)
       this.animationFrame = null
@@ -597,114 +619,34 @@ export default class extends Controller {
       this.scoreAnimationInterval = null
     }
 
-    // Get current displayed score from text element if available, otherwise use localScore
-    let startScore = this.localScore !== undefined ? this.localScore : (this.scoreValue || 0)
-    if (scoreText && scoreText.textContent) {
-      const displayedScore = parseInt(scoreText.textContent)
-      if (!isNaN(displayedScore)) {
-        startScore = displayedScore
-      }
-    }
-
     // Update local score immediately
     this.localScore = targetScore
     this.scoreValue = targetScore
 
-    // Calculate score difference first
-    const scoreDiff = targetScore - startScore
-
-    // Smooth animation for all changes, including decay
-    const startTime = Date.now()
-    let duration
-    if (scoreDiff < 0) {
-      // Smooth decay - slower for better visual experience
-      duration = Math.max(800, Math.abs(scoreDiff) * 60) // 60ms per point for decay, min 800ms
-    } else if (Math.abs(scoreDiff) <= 2) {
-      // Quick update for very small changes
-      duration = Math.max(300, Math.abs(scoreDiff) * 50) // 50ms per point, min 300ms
-    } else {
-      // Smooth animation for larger increases
-      const baseDuration = 1000 // 1 second base
-      duration = Math.max(500, Math.min(baseDuration, Math.abs(scoreDiff) * 50)) // 50ms per point, min 500ms, max 1s
-    }
-
-    // Animate the gauge SVG smoothly
+    // Update gauge visual immediately - no transitions
     if (gauge) {
       const arcLength = 314.16
       const targetOffset = arcLength - (targetScore / 100) * arcLength
 
-      // Calculate color based on score - very light green at 0 to bright green at 100
-      // Start with very light green and get brighter/more saturated at 100
-      const colorIntensity = targetScore / 100 // 0 to 1
-      const lightColor = { r: 200, g: 250, b: 230 } // Very light green at 0
-      const brightColor = { r: 16, g: 185, b: 129 } // Bright green #10b981 at 100
-
-      // Interpolate between very light and bright green
+      // Calculate color
+      const colorIntensity = targetScore / 100
+      const lightColor = { r: 200, g: 250, b: 230 }
+      const brightColor = { r: 16, g: 185, b: 129 }
       const r = Math.round(lightColor.r + (brightColor.r - lightColor.r) * colorIntensity)
       const g = Math.round(lightColor.g + (brightColor.g - lightColor.g) * colorIntensity)
       const b = Math.round(lightColor.b + (brightColor.b - lightColor.b) * colorIntensity)
-
       const color = `rgb(${r}, ${g}, ${b})`
 
-      // Add smooth transition to the gauge - match duration with score animation
-      gauge.style.transition = `stroke-dashoffset ${duration}ms cubic-bezier(0.4, 0, 0.2, 1), stroke ${duration}ms cubic-bezier(0.4, 0, 0.2, 1)`
+      // Always update immediately - no transitions for sync accuracy
+      gauge.style.transition = "none"
       gauge.style.strokeDashoffset = targetOffset
       gauge.style.stroke = color
-
-      // Update drop shadow color to match
       gauge.style.filter = `drop-shadow(0 0 10px rgba(${r}, ${g}, ${b}, 0.5))`
     }
 
-    // Animate the score number to show every integer
-    // Use a more efficient approach: only animate if difference is significant
-    if (scoreText && Math.abs(scoreDiff) > 0) {
-      // For small changes, just update directly
-      if (Math.abs(scoreDiff) <= 3) {
-        scoreText.textContent = targetScore
-        this.localScore = targetScore
-        this.scoreValue = targetScore
-      } else {
-        // For larger changes, animate but throttle updates
-        let lastDisplayedScore = startScore
-        let lastUpdateTime = startTime
-        const minUpdateInterval = 16 // ~60fps max
-
-        const animateScore = () => {
-          const now = Date.now()
-          const elapsed = now - startTime
-          const progress = Math.min(elapsed / duration, 1)
-
-          // Only update if enough time has passed (throttle to ~60fps)
-          if (now - lastUpdateTime >= minUpdateInterval || progress >= 1) {
-            // Easing function for smooth animation
-            const easeOutCubic = 1 - Math.pow(1 - progress, 3)
-            const currentScore = Math.round(startScore + (scoreDiff * easeOutCubic))
-
-            // Only update if the score has changed by at least 1
-            if (currentScore !== lastDisplayedScore) {
-              scoreText.textContent = currentScore
-              lastDisplayedScore = currentScore
-              lastUpdateTime = now
-            }
-          }
-
-          if (progress < 1) {
-            this.animationFrame = requestAnimationFrame(animateScore)
-          } else {
-            scoreText.textContent = targetScore
-            this.localScore = targetScore
-            this.scoreValue = targetScore
-            this.animationFrame = null
-          }
-        }
-
-        this.animationFrame = requestAnimationFrame(animateScore)
-      }
-    } else if (scoreText) {
-      // No animation needed, just update directly
-      scoreText.textContent = targetScore
-      this.localScore = targetScore
-      this.scoreValue = targetScore
+    // Update score number immediately
+    if (scoreText) {
+      scoreText.textContent = Math.round(targetScore)
     }
   }
 

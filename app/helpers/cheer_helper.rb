@@ -109,8 +109,23 @@ module CheerHelper
     FALLBACK_LOCATIONS.sample
   end
 
+  # Map of full country names to abbreviations
+  COUNTRY_ABBREVIATIONS = {
+    "United States" => "US",
+    "United States of America" => "US",
+    "United Kingdom" => "UK",
+    "United Kingdom of Great Britain and Northern Ireland" => "UK"
+  }.freeze
+
+  def shorten_country(country)
+    return country if country.blank?
+    COUNTRY_ABBREVIATIONS[country] || country
+  end
+
   def format_location(city, country, cheer_id = nil)
-    location_text = [city, country].compact.join(", ")
+    # Shorten country name if possible
+    shortened_country = shorten_country(country)
+    location_text = [city, shortened_country].compact.join(", ")
 
     if location_text.present?
       # Use cheer_id to add variety - each cheer gets a different suffix even for same location

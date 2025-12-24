@@ -7,120 +7,132 @@ class CheerController < ApplicationController
   end
 
   def create
-    # Try to get the real IP address (Fly.io and other proxies set X-Forwarded-For)
+    # Get IP address
     ip = request.headers["X-Forwarded-For"]&.split(",")&.first&.strip ||
          request.headers["X-Real-IP"] ||
          request.remote_ip
 
-    country = nil
-    city = nil
-    location_source = nil
-    debug_info = {}
-
-    debug_info[:request_ip] = ip
-    debug_info[:request_remote_ip] = request.remote_ip
-    debug_info[:request_headers] = {
-      content_type: request.content_type,
-      x_forwarded_for: request.headers["X-Forwarded-For"],
-      x_real_ip: request.headers["X-Real-IP"],
-      remote_addr: request.remote_addr,
-      all_headers: request.headers.to_h.select { |k, v| k.start_with?("X-") || k.start_with?("HTTP_") }
-    }
-
-    # Try to use geolocation data from request body first
-    if request.content_type&.include?("application/json") && request.body.present?
-      begin
-        location_data = JSON.parse(request.body.read)
-        debug_info[:geolocation_received] = { lat: location_data["latitude"], lng: location_data["longitude"] }
-
-        if location_data["latitude"] && location_data["longitude"]
-          location = Geocoder.search([location_data["latitude"], location_data["longitude"]]).first
-          debug_info[:geocoder_result] = location&.data
-          debug_info[:geocoder_full_result] = location&.inspect
-          country = location&.country
-          city = location&.city
-          location_source = "geolocation"
-          debug_info[:geolocation_success] = { country: country, city: city }
-        else
-          debug_info[:geolocation_missing_coords] = true
-        end
-      rescue JSON::ParserError => e
-        debug_info[:json_error] = e.message
-      end
-    else
-      debug_info[:no_geolocation] = "No geolocation data in request"
-      debug_info[:content_type] = request.content_type
-      debug_info[:body_present] = request.body.present?
-    end
-
-    # Fallback to IP-based geocoding if geolocation wasn't available
-    if country.nil? && city.nil?
-      debug_info[:falling_back_to_ip] = true
-      debug_info[:ip_address] = ip
-      debug_info[:ip_for_geocoding] = ip
-
-      begin
-        location = Geocoder.search(ip).first
-        debug_info[:ip_geocoder_result] = location&.data
-        debug_info[:ip_geocoder_full_result] = location&.inspect
-        debug_info[:ip_geocoder_methods] = location&.methods&.grep(/country|city|location/) if location
-        country = location&.country
-        city = location&.city
-        debug_info[:ip_geocoding_success] = { country: country, city: city }
-        location_source = "ip"
-      rescue => e
-        debug_info[:ip_geocoding_error] = e.message
-        debug_info[:ip_geocoding_error_class] = e.class.name
-      end
-    end
-
-    debug_info[:final_location] = { country: country, city: city, source: location_source }
-
-    Rails.logger.info "🔍 CHEER LOCATION DEBUG: #{debug_info.inspect}"
-    puts "🔍 CHEER LOCATION DEBUG: #{debug_info.inspect}"
-
-    # Generate device ID from IP + User-Agent
-    # This identifies different devices even from the same IP
+    # Generate device ID
     user_agent = request.headers["User-Agent"] || ""
     device_id = Digest::MD5.hexdigest("#{ip}-#{user_agent}")
 
-    # Store cheer event in cache
+    # Parse location data from request body if present
+    location_data = nil
+    if request.content_type&.include?("application/json") && request.body.present?
+      begin
+        location_data = JSON.parse(request.body.read)
+      rescue JSON::ParserError
+        # Ignore JSON parse errors
+      end
+    end
+
+    # Store cheer event IMMEDIATELY without location (for instant score update)
     cheer_event = CheerEventStore.create(
       ip_address: ip,
-      country: country,
-      city: city,
+      country: nil,  # Will be filled asynchronously
+      city: nil,     # Will be filled asynchronously
       device_id: device_id
     )
 
-    # Broadcast the updated score with location debug info and recent cheers
+    # Calculate score and get recent cheers IMMEDIATELY
     score = CheerScore.current
-    recent_cheers = CheerEventStore.recent(limit: 5).map do |cheer|
-      cheer_id = cheer["id"] || cheer["created_at"]
-      { formatted_location: helpers.format_location(cheer["city"], cheer["country"], cheer_id) }
-    end
+    recent_cheers_raw = CheerEventStore.recent(limit: 5)
 
+    # Format locations for broadcast (may be nil for new event, that's OK)
+    recent_cheers = format_recent_cheers(recent_cheers_raw)
+
+    # Broadcast IMMEDIATELY with score (location will come later)
     ActionCable.server.broadcast("cheerometer", {
       score: score,
-      location: { country: country, city: city, source: location_source },
-      recent_cheers: recent_cheers,
-      debug: debug_info
+      recent_cheers: recent_cheers
     })
+
+    # Do ALL geocoding asynchronously (doesn't block response)
+    perform_geocoding_async(cheer_event["id"], ip, location_data)
 
     head :ok
   end
 
   def meter
-    # JSON endpoint for fetching current score (used by gauge controller)
     @score = CheerScore.current
     @recent_cheers_data = CheerEventStore.recent(limit: 5) || []
 
     respond_to do |format|
       format.json do
-        recent_cheers = @recent_cheers_data.map do |cheer|
-          cheer_id = cheer["id"] || cheer["created_at"]
-          { formatted_location: helpers.format_location(cheer["city"], cheer["country"], cheer_id) }
-        end
+        recent_cheers = format_recent_cheers(@recent_cheers_data)
         render json: { score: @score, recent_cheers: recent_cheers }
+      end
+    end
+  end
+
+  private
+
+  def format_recent_cheers(cheers)
+    helper = Object.new.extend(CheerHelper)
+    cheers.map do |cheer|
+      cheer_id = cheer["id"] || cheer["created_at"]
+      cheer_city = cheer["city"]
+      cheer_country = cheer["country"]
+      formatted = helper.format_location(cheer_city, cheer_country, cheer_id)
+      { formatted_location: formatted }
+    end
+  end
+
+  def perform_geocoding_async(event_id, ip, location_data)
+    Thread.new(event_id, ip, location_data) do |thread_event_id, thread_ip, thread_location_data|
+      begin
+        Rails.logger.info "🌍 [SERVER] Starting background geocoding for event: #{thread_event_id}"
+        country = nil
+        city = nil
+
+        # Try reverse geocoding first if we have coordinates
+        if thread_location_data && thread_location_data["latitude"] && thread_location_data["longitude"]
+          begin
+            location = Geocoder.search([thread_location_data["latitude"], thread_location_data["longitude"]]).first
+            country = location&.country
+            city = location&.city
+            Rails.logger.info "🌍 [SERVER] Reverse geocoding: city=#{city.inspect}, country=#{country.inspect}"
+          rescue => e
+            Rails.logger.warn "⚠️ [SERVER] Reverse geocoding error: #{e.class} - #{e.message}"
+          end
+        end
+
+        # Fallback to IP geocoding
+        if country.nil? && city.nil?
+          begin
+            location = Geocoder.search(thread_ip).first
+            country = location&.country
+            city = location&.city
+            Rails.logger.info "🌍 [SERVER] IP geocoding: city=#{city.inspect}, country=#{country.inspect}"
+          rescue => e
+            Rails.logger.warn "⚠️ [SERVER] IP geocoding error: #{e.class} - #{e.message}"
+          end
+        end
+
+        # Update event with location if we got it
+        if (country || city) && CheerEventStore.update_location(thread_event_id, country: country, city: city)
+          Rails.logger.info "✅ [SERVER] Location updated: city=#{city.inspect}, country=#{country.inspect}"
+
+          # Broadcast updated location
+          updated_score = CheerScore.current
+          helper = Object.new.extend(CheerHelper)
+          updated_recent_cheers = CheerEventStore.recent(limit: 5).map do |cheer|
+            cheer_id = cheer["id"] || cheer["created_at"]
+            cheer_city = cheer["city"]
+            cheer_country = cheer["country"]
+            formatted = helper.format_location(cheer_city, cheer_country, cheer_id)
+            { formatted_location: formatted }
+          end
+
+          ActionCable.server.broadcast("cheerometer", {
+            score: updated_score,
+            recent_cheers: updated_recent_cheers
+          })
+          Rails.logger.info "✅ [SERVER] Location update broadcast sent"
+        end
+      rescue => e
+        Rails.logger.error "❌ [SERVER] Background geocoding error: #{e.class} - #{e.message}"
+        Rails.logger.error e.backtrace.first(10).join("\n")
       end
     end
   end
