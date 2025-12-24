@@ -19,33 +19,104 @@
     <%= stylesheet_link_tag "application", "data-turbo-track": "reload" %>
     <%= javascript_include_tag "application", "data-turbo-track": "reload", type: "module" %>
     <script>
-      // Prevent pinch zoom
+      // Prevent all zoom gestures - very aggressive
       document.addEventListener('gesturestart', function (e) {
         e.preventDefault();
-      });
+        e.stopPropagation();
+        return false;
+      }, { passive: false });
+
       document.addEventListener('gesturechange', function (e) {
         e.preventDefault();
-      });
+        e.stopPropagation();
+        return false;
+      }, { passive: false });
+
       document.addEventListener('gestureend', function (e) {
         e.preventDefault();
-      });
+        e.stopPropagation();
+        return false;
+      }, { passive: false });
 
-      // Prevent pinch zoom with touch events
+      // Prevent multi-touch
+      document.addEventListener('touchstart', function (e) {
+        if (e.touches.length > 1) {
+          e.preventDefault();
+          e.stopPropagation();
+          return false;
+        }
+      }, { passive: false });
+
+      document.addEventListener('touchmove', function (e) {
+        if (e.touches.length > 1) {
+          e.preventDefault();
+          e.stopPropagation();
+          return false;
+        }
+      }, { passive: false });
+
+      // Prevent double-tap zoom - very aggressive approach
       let lastTouchEnd = 0;
+      let touchStartTime = 0;
+      let touchStartTarget = null;
+
+      document.addEventListener('touchstart', function (e) {
+        touchStartTime = Date.now();
+        touchStartTarget = e.target;
+      }, { passive: true });
+
       document.addEventListener('touchend', function (event) {
+        const now = Date.now();
+        const timeSinceStart = now - touchStartTime;
+        const timeSinceLastTouch = now - lastTouchEnd;
+
+        // Prevent if it's a quick double tap (within 300ms)
+        // Or if it's a very quick tap that could be part of a double-tap
+        if (timeSinceLastTouch <= 300) {
+          event.preventDefault();
+          event.stopPropagation();
+          event.stopImmediatePropagation();
+          return false;
+        }
+
+        // Also prevent if it's a very quick tap (could be first tap of double-tap)
+        if (timeSinceStart <= 150 && timeSinceLastTouch <= 500) {
+          // Only prevent if it's not on an interactive element
+          if (!event.target.closest('button') && !event.target.closest('a')) {
+            event.preventDefault();
+            event.stopPropagation();
+            return false;
+          }
+        }
+
+        lastTouchEnd = now;
+      }, { passive: false, capture: true });
+
+      // Additional prevention on touchcancel
+      document.addEventListener('touchcancel', function (event) {
         const now = Date.now();
         if (now - lastTouchEnd <= 300) {
           event.preventDefault();
+          event.stopPropagation();
         }
-        lastTouchEnd = now;
-      }, false);
+      }, { passive: false });
 
       // Prevent wheel zoom
       document.addEventListener('wheel', function (e) {
         if (e.ctrlKey) {
           e.preventDefault();
+          e.stopPropagation();
+          return false;
         }
       }, { passive: false });
+
+      // Prevent iOS Safari double-tap zoom with meta tag enforcement
+      if (navigator.userAgent.match(/iPhone|iPad|iPod/)) {
+        const viewport = document.querySelector('meta[name="viewport"]');
+        if (viewport) {
+          viewport.setAttribute('content', 'width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no,viewport-fit=cover');
+        }
+      }
     </script>
     <style>
       html, body {
@@ -55,7 +126,7 @@
         height: 100%;
         overflow: hidden;
         position: fixed;
-        touch-action: none;
+        touch-action: none !important;
         -webkit-overflow-scrolling: none;
         overscroll-behavior: none;
         font-family: 'Fredoka One', 'Mountains of Christmas', cursive, sans-serif;
@@ -63,17 +134,21 @@
         -webkit-touch-callout: none;
         -webkit-user-select: none;
         user-select: none;
+        -ms-touch-action: none;
       }
 
       * {
         -webkit-tap-highlight-color: transparent;
         -webkit-user-select: none;
         user-select: none;
+        touch-action: none !important;
+        -ms-touch-action: none;
       }
 
       button, a {
         touch-action: manipulation !important;
         -webkit-tap-highlight-color: transparent;
+        -ms-touch-action: manipulation !important;
       }
 
       button.pressed {

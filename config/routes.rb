@@ -11,8 +11,6 @@ Rails.application.routes.draw do
 
   # Defines the root path route ("/")
   root "cheer#index"
-  get "/smash", to: "cheer#button"
   post "/cheer", to: "cheer#create"
-  get "/cheerometer", to: "cheer#meter"
-  get "/combined", to: "cheer#combined"
+  get "/cheerometer", to: "cheer#meter" # JSON endpoint for score updates
 end

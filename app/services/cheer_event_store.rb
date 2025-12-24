@@ -4,7 +4,7 @@ class CheerEventStore
   CACHE_KEY = "cheer_events"
   MAX_EVENTS = 1000 # Keep last 1000 events to avoid memory issues
 
-  def self.create(ip_address:, country: nil, city: nil)
+  def self.create(ip_address:, country: nil, city: nil, device_id: nil)
     now = Time.current
     event_id = "#{now.to_f}-#{SecureRandom.hex(4)}"
 
@@ -13,6 +13,7 @@ class CheerEventStore
       "ip_address" => ip_address,
       "country" => country,
       "city" => city,
+      "device_id" => device_id,
       "created_at" => now.to_f
     }
 

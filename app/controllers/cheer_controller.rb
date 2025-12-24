@@ -2,9 +2,8 @@ class CheerController < ApplicationController
   protect_from_forgery with: :null_session
 
   def index
-  end
-
-  def button
+    @score = CheerScore.current
+    @recent_cheers_data = CheerEventStore.recent(limit: 5) || []
   end
 
   def create
@@ -80,11 +79,17 @@ class CheerController < ApplicationController
     Rails.logger.info "🔍 CHEER LOCATION DEBUG: #{debug_info.inspect}"
     puts "🔍 CHEER LOCATION DEBUG: #{debug_info.inspect}"
 
+    # Generate device ID from IP + User-Agent
+    # This identifies different devices even from the same IP
+    user_agent = request.headers["User-Agent"] || ""
+    device_id = Digest::MD5.hexdigest("#{ip}-#{user_agent}")
+
     # Store cheer event in cache
     cheer_event = CheerEventStore.create(
       ip_address: ip,
       country: country,
-      city: city
+      city: city,
+      device_id: device_id
     )
 
     # Broadcast the updated score with location debug info and recent cheers
@@ -105,11 +110,11 @@ class CheerController < ApplicationController
   end
 
   def meter
+    # JSON endpoint for fetching current score (used by gauge controller)
     @score = CheerScore.current
-    @recent_cheers_data = CheerEventStore.recent(limit: 5)
+    @recent_cheers_data = CheerEventStore.recent(limit: 5) || []
 
     respond_to do |format|
-      format.html
       format.json do
         recent_cheers = @recent_cheers_data.map do |cheer|
           cheer_id = cheer["id"] || cheer["created_at"]
@@ -118,10 +123,5 @@ class CheerController < ApplicationController
         render json: { score: @score, recent_cheers: recent_cheers }
       end
     end
-  end
-
-  def combined
-    @score = CheerScore.current
-    @recent_cheers_data = CheerEventStore.recent(limit: 5)
   end
 end
