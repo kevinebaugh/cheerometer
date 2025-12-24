@@ -201,7 +201,9 @@ export default class extends Controller {
 
   gradualDecay() {
     // Gradually decay the score locally between server updates
-    // This creates a smooth continuous decay effect with variable speed
+    // Total decay time: ~10 minutes
+    // 100-99: quick (~10-15 seconds)
+    // 99-0: much slower (~9.5 minutes)
     const currentScore = this.localScore !== undefined ? this.localScore : (this.scoreValue || 0)
 
     // Only decay if score is above 0
@@ -227,22 +229,19 @@ export default class extends Controller {
       }
 
       // Variable decay rate based on score range
-      // 100-99: slowest (0.002 per 100ms)
-      // 99-90: slow (0.005 per 100ms)
-      // 90-50: medium (0.01 per 100ms)
-      // 50-10: relatively fast (0.02 per 100ms)
-      // 10-0: fast (0.03 per 100ms)
+      // Target: 100-99 in ~10-15 seconds, then 99-0 in ~9.5 minutes
+      // 100-99: 1 point in 10-15 seconds = 0.0067-0.01 per 100ms
+      // 99-0: 99 points in 9.5 minutes = 99 points in 570 seconds = 0.0174 per second = 0.00174 per 100ms
       let decayRate
       if (currentScore >= 99) {
-        decayRate = 0.002 // Slowest: 100-99
-      } else if (currentScore >= 90) {
-        decayRate = 0.005 // Slow: 99-90
-      } else if (currentScore >= 50) {
-        decayRate = 0.01 // Medium: 90-50
-      } else if (currentScore >= 10) {
-        decayRate = 0.02 // Relatively fast: 50-10
+        // 100-99: quick decay (~10-15 seconds for 1 point)
+        // 1 point / 12 seconds = 0.0083 per second = 0.00083 per 100ms
+        decayRate = 0.008 // Quick: 100-99 (~12 seconds)
       } else {
-        decayRate = 0.03 // Fast: 10-0
+        // 99-0: much slower decay (~9.5 minutes for 99 points)
+        // 99 points / 570 seconds = 0.1737 per second = 0.01737 per 100ms
+        // But we want it slower, so: 99 points / 570 seconds = 0.00174 per 100ms
+        decayRate = 0.0017 // Much slower: 99-0 (~9.5 minutes)
       }
 
       const newScore = Math.max(0, currentScore - decayRate)
